@@ -5,7 +5,7 @@ use std::net::TcpListener;
 
     ///PACKET_SIZE - Размер GDB-RSP-пакета ("PacketSize=PACKET_SIZE" в ответ на qSupported)
     ///Размер должен вмещать все GPR регистры + символ 'G'
-    const PACKET_SIZE: usize = 1024;
+    const PACKET_SIZE: usize = 1024; //Уточнить, возможно имеет смысл сделать побольше !!!!!!!!
     ///BUF_SIZE - Размер буфера под TCP-пакет от GDB (В 2 раза больше просто на всякий случай) //???????
     const BUF_SIZE: usize = PACKET_SIZE * 2;
 
@@ -16,7 +16,7 @@ pub struct RspPacket<'a>
     pub data: Option<&'a str>,                      // Только данные <data> из RSP-пакета (между первым '$' и последним '#')
     pub first_cmd_symbol: Option<char>,             // Первый символ данных data[0]
     pub last_ack_sign: Option<char>,                // Acknowledgment '+' или '-' для предыдущего пакета (если есть). На случай, если no-acknowledgment режим еще не включен
-    pub only_ack: Option<bool>,                     // Признак того, что это не пакет, а одиночный acknowledgment '+' или '-'
+    pub only_symb: Option<bool>,                    // Признак того, что это не пакет, а одиночный acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
     pub cs: Option<&'a str>,                        // Контрольная сумма RSP-пакета
     pub responce: Option<String>,                   // Ответный RSP-пакет
     pub need_responce: Option<bool>,                // Признак необходимости ответа
@@ -29,39 +29,63 @@ impl<'a> RspPacket<'a>
     ///Конструктор
     pub fn new(input_buf: &'a[u8], input_len: usize) -> RspPacket<'a>
     {
-        if input_len > 1{ //Пакет $data#cs, а не одиночный acknowledgment '+' или '-'
-            let usd_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .find('$').unwrap();
-            let sharp_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .rfind('#').unwrap(); // .rfind() для быстроты
-            println!("usd_pos: {}", usd_pos);//Убрать!
-            println!("sharp_pos: {}", sharp_pos);//Убрать!
+        match input_len
+        {
+            2...PACKET_SIZE => //Диапазоны в образцах включительные
+            { //if input_len > 1 : Пакет $data#cs, а не одиночный символ
+                let usd_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .find('$').unwrap();
+                let sharp_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .find('#').unwrap(); //Или .rfind() для быстроты
+                println!("usd_pos: {}", usd_pos);//Убрать!
+                println!("sharp_pos: {}", sharp_pos);//Убрать!
 
-            RspPacket{
-                len: Some(input_len),
-                src_packet: str::from_utf8(&input_buf[0 .. input_len]).ok(),
-                data: str::from_utf8(&input_buf[usd_pos+1 .. sharp_pos]).ok(),
-                first_cmd_symbol: Some( char::from(input_buf[usd_pos+1]) ),
-                last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
-                only_ack: Some(false),
-                cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
-                responce: None, //Ответ будет сформирован при необходимости
-                need_responce: None, //Признак будет сформирован в зависимости от пришедшей команды
-                kill_flag: Some(false),
+                RspPacket{
+                    len: Some(input_len),
+                    src_packet: str::from_utf8(&input_buf[0 .. input_len]).ok(),
+                    data: str::from_utf8(&input_buf[usd_pos+1 .. sharp_pos]).ok(),
+                    first_cmd_symbol: Some( char::from(input_buf[usd_pos+1]) ),
+                    last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
+                    only_symb: Some(false),
+                    cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
+                    responce: None, //Ответ будет сформирован при необходимости
+                    need_responce: Some(true), //Признак может быть сброшен в зависимости от пришедшей команды (только в случае, если это Пакет)
+                    kill_flag: Some(false),
+                }
             }
-        }
-        else{ //Не пакет, а одиночный acknowledgment '+' или '-'
-            RspPacket{
-                len: Some(input_len),
-                src_packet: str::from_utf8(&input_buf[0..input_len]).ok(),
-                data: None,
-                first_cmd_symbol: None,
-                last_ack_sign: Some(char::from(input_buf[0])),
-                only_ack: Some(true),
-                cs: None,
-                responce: None, //Ответ будет сформирован при необходимости
-                need_responce: Some(true), //На '+' надо ответить '+'; На '-' надо повторить последний пакет
-                kill_flag: Some(false),
+            1 =>
+            { //if 1 == input_len : Не пакет, а одиночный acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+                RspPacket{
+                    len: Some(input_len),
+                    src_packet: str::from_utf8(&input_buf[0..input_len]).ok(),
+                    data: None,
+                    first_cmd_symbol: None,
+                    last_ack_sign: Some(char::from(input_buf[0])),
+                    only_symb: Some(true),
+                    cs: None,
+                    responce: None, //Ответ будет сформирован при необходимости
+                    need_responce: Some(true), //На '+' надо ответить '+'; На '-' надо повторить последний пакет; На Ctrl+C - Stop Reply Packet
+                    kill_flag: Some(false),
+                }
             }
-        }
+            0 => 
+            { //Пустое сообщение (input_len = 0)
+                RspPacket{
+                    len: Some(0),
+                    src_packet: None,
+                    data: None,
+                    first_cmd_symbol: None,
+                    last_ack_sign: None,
+                    only_symb: None,
+                    cs: None,
+                    responce: None,
+                    need_responce: Some(false), //Игнорировать пустое сообщение
+                    kill_flag: Some(false),
+                }
+            }
+            _ =>
+            { //Такого не должно быть, так как input_len типа usize
+                panic!("Исключение в конструкторе структуры RspPacket: Некорректное значение input_len");
+            }
+        }//match
     }
 
 
@@ -332,31 +356,37 @@ pub fn gdb_server()
     let addr = "127.0.0.1:9999";
     let listener = TcpListener::bind(addr).unwrap();
     println!("Server listening at {}", addr);
-    let mut input_buf = [0x7Eu8; BUF_SIZE];
-    let mut input_len = 0;
+    let mut input_buf = [0x7Eu8; BUF_SIZE]; //Инициализация буфера символом '~'
+    let mut input_len = 0; //usize
 
     for stream in listener.incoming() //stream типа TcpStream
     {
         let mut stream = stream.unwrap();
         loop
         {
-                input_buf = [0x7Eu8; BUF_SIZE]; //Переинициализация буфера (наверно можно будет убрать)
                 input_len = stream.read(&mut input_buf).unwrap();
-                let mut rsp_pkt = RspPacket::new(&input_buf, input_len); // Убрать конструктор из цикла!!!!!!!!!!!!!!
-                if rsp_pkt.only_ack.unwrap()
-                {//acknowledgment '+' или '-'
-                    //На любой '+' надо ответить '+', на '-' надо повторить последнее сообщение
-                    //Наверно при работе по TCP/IP не будет '-' (Поэтому ответ на '-' пока не реализован)
-                    rsp_pkt.responce("+");
-                    rsp_pkt.need_responce = Some(true);
+                let mut rsp_pkt = RspPacket::new(&input_buf, input_len);
+
+                if rsp_pkt.need_responce.unwrap()
+                {//Ответ требуется
+                    if rsp_pkt.only_symb.unwrap()
+                    {//acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+                        //На любой '+' надо ответить '+'. На '-' надо повторить последнее сообщение
+                        //Наверно при работе по TCP/IP не будет '-' (поэтому ответ на '-' пока не реализован)
+                        rsp_pkt.responce("+");
+                    }
+                    else
+                    {//Пакет
+                        rsp_pkt.match_cmd();
+                    }
                 }
-                else
-                {//Пакет
-                    rsp_pkt.match_cmd();
+                if !rsp_pkt.need_responce.unwrap()
+                {//Ответ не требуется. Отдельный if (а не else) т.к. изначальный признак need_responce может быть сброшен в зависимости от команды (только в случае, если это пакет)
+                    //////////////////////////////Что-то сделать. (Вывести в Лог?)
                 }
 
 
-                //Убрать:
+                //Убрать ======================================================================:
                 println!("len of src_packet: {}", rsp_pkt.len.unwrap()); //Длина пакета в буфере
                 //println!("Received Buffer: {}", str::from_utf8(&input_buf).unwrap()); //Буфер
                 println!("src_packet: {}", &rsp_pkt.src_packet.unwrap()); //Пакет в буфере
@@ -369,7 +399,7 @@ pub fn gdb_server()
                 }
                 else
                 { //acknowledgment, не пакет
-                    println!("only_ack: {}", &rsp_pkt.only_ack.unwrap());
+                    println!("only_ack: {}", &rsp_pkt.only_symb.unwrap());
                 }
                 if input_buf[0] != b'$'
                 { //Наличие acknowledgment символа '+' или '-'
