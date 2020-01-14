@@ -137,6 +137,12 @@ impl<'a> RspPacket<'a>
         }
     }
 
+    ///Сформировать stop-reply packet
+    fn responce_stop_reply_packet(& mut self, signal: &str)
+    {
+
+    }
+
 
     ///Обработка полученной команды
     fn match_cmd(&mut self)
@@ -151,7 +157,7 @@ impl<'a> RspPacket<'a>
                 //Возможно добавить S02 = SIGINT
                 self.responce_add_usd_cs("S05");
                 self.need_responce = Some(true);
-            }
+            },
 
             'g'=>
             {
@@ -159,7 +165,7 @@ impl<'a> RspPacket<'a>
                 //Чтение всех регистров общего назначения
                 self.responce_add_usd_cs("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
                 self.need_responce = Some(true);
-            }
+            },
 
             'G'=>
             {
@@ -169,7 +175,7 @@ impl<'a> RspPacket<'a>
                 //Искать .find("G") только в начале (для скорости)
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
-            }
+            },
 
             'p'=>
             {
@@ -177,7 +183,7 @@ impl<'a> RspPacket<'a>
                 println!("GDB-Server : Получена команда p. Номер регистра {}", usize::from_str_radix(&self.data.unwrap()[1..], 16).unwrap());
                 self.responce_add_usd_cs("0a00011000000000");
                 self.need_responce = Some(true);
-            }
+            },
 
             'P'=>
             {
@@ -188,7 +194,7 @@ impl<'a> RspPacket<'a>
                 println!("GDB-Server : Получена команда P. Номер регистра {}. Значение = {}", reg_num, reg_val);
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
-            }
+            },
 
             'm'=>
             {
@@ -199,7 +205,7 @@ impl<'a> RspPacket<'a>
                 println!("GDB-Server : Получена команда m. Адрес = {:x}. Количество байт для чтения = {}", addr, bytes_len);
                 self.responce_add_usd_cs("00112233");
                 self.need_responce = Some(true);
-            }
+            },
 
             'X' | 'M'=>
             {
@@ -219,7 +225,7 @@ impl<'a> RspPacket<'a>
                 }
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
-            }
+            },
 
             'c'=>
             {
@@ -237,7 +243,7 @@ impl<'a> RspPacket<'a>
                 //Ответ вроде не нужен !!!!!!!!????????
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
-            }
+            },
 
             'q'=>
             {
@@ -247,7 +253,7 @@ impl<'a> RspPacket<'a>
                     println!("GDB-Server : Получена команда qSupported");
                     //'PacketSize=xx' обязательно.
                     //'QStartNoAckMode+' обязательно.
-                    self.responce_add_usd_cs( &format!("PacketSize={:x};QStartNoAckMode+", PACKET_SIZE) );
+                    self.responce_add_usd_cs( &format!("PacketSize={:x};QStartNoAckMode+;vContSupported+", PACKET_SIZE) );
                     self.need_responce = Some(true);
                 }
                 else if self.data.unwrap().contains("qfThreadInfo")
@@ -321,7 +327,51 @@ impl<'a> RspPacket<'a>
 
             'v'=>
             {
-                if self.data.unwrap().contains("vKill")
+                if self.data.unwrap().contains("vCont")
+                {
+                    match &self.data.unwrap()[0..6]
+                    {
+                        "vCont?" => //if self.data.unwrap().contains("vCont?")
+                        {//Запрос поддерживаемых vCont-action
+                            println!("GDB-Server : Получена команда vCont?");
+                            self.responce_add_usd_cs("vCont;c;C;s;S"); //GDB doesn't accept c without C and s without S
+                            self.need_responce = Some(true);
+                        }
+                        "vCont;" =>
+                        {//Команда к действию (vCont-action)
+                            println!("GDB-Server : Получена команда vCont;");
+                            //Распарсить содержимое vCont (Пока считать, что будет один поток??)
+                            match &self.data.unwrap()[5..7]
+                            {
+                                ";c" =>
+                                {//continue action
+                                    println!("GDB-Server : vCont, c-action");
+                                    self.responce_stop_reply_packet("05");
+                                    self.need_responce = Some(true);
+                                },
+                                ";s" =>
+                                {//step action
+                                    println!("GDB-Server : vCont, s-action");
+                                    self.responce_stop_reply_packet("05");
+                                    self.need_responce = Some(true);
+                                },
+                                _=>
+                                {
+                                    println!("GDB-Server : Unknown vCont action: {}", &self.data.unwrap()[5..6]);
+                                    self.responce("+$#00");
+                                    self.need_responce = Some(true);
+                                },
+                            }//match vCont-action
+                        },
+                        _=>
+                        {
+                            println!("GDB-Server : Unknown vCont command");
+                            self.responce("+$#00");
+                            self.need_responce = Some(true);
+                        },
+                    }//match vCont
+                }
+                else if self.data.unwrap().contains("vKill")
                 {
                     println!("GDB-Server : Получена команда vKill");
                     self.responce("$OK#9a");
@@ -336,7 +386,7 @@ impl<'a> RspPacket<'a>
                     self.responce("+$#00");
                     self.need_responce = Some(true);
                 }
-            }
+            },
 
             _=>
             {
@@ -364,26 +414,26 @@ pub fn gdb_server()
         let mut stream = stream.unwrap();
         loop
         {
-                input_len = stream.read(&mut input_buf).unwrap();
-                let mut rsp_pkt = RspPacket::new(&input_buf, input_len);
+            input_len = stream.read(&mut input_buf).unwrap();
+            let mut rsp_pkt = RspPacket::new(&input_buf, input_len);
 
-                if rsp_pkt.need_responce.unwrap()
-                {//Ответ требуется
-                    if rsp_pkt.only_symb.unwrap()
-                    {//acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
-                        //На любой '+' надо ответить '+'. На '-' надо повторить последнее сообщение
-                        //Наверно при работе по TCP/IP не будет '-' (поэтому ответ на '-' пока не реализован)
-                        rsp_pkt.responce("+");
-                    }
-                    else
-                    {//Пакет
-                        rsp_pkt.match_cmd();
-                    }
+            if rsp_pkt.need_responce.unwrap()
+            {//Ответ требуется
+                if rsp_pkt.only_symb.unwrap()
+                {//acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+                    //На любой '+' надо ответить '+'. На '-' надо повторить последнее сообщение
+                    //Наверно при работе по TCP/IP не будет '-' (поэтому ответ на '-' пока не реализован)
+                    rsp_pkt.responce("+");
                 }
-                if !rsp_pkt.need_responce.unwrap()
-                {//Ответ не требуется. Отдельный if (а не else) т.к. изначальный признак need_responce может быть сброшен в зависимости от команды (только в случае, если это пакет)
-                    //////////////////////////////Что-то сделать. (Вывести в Лог?)
+                else
+                {//Пакет
+                    rsp_pkt.match_cmd();
                 }
+            }
+            if !rsp_pkt.need_responce.unwrap()
+            {//Ответ не требуется. Отдельный if (а не else) т.к. изначальный признак need_responce может быть сброшен в зависимости от команды (только в случае, если это пакет)
+                //////////////////////////////Что-то сделать? (Вывести в Лог?)
+            }
 
 
                 //Убрать ======================================================================:
@@ -417,17 +467,17 @@ pub fn gdb_server()
                 println!("==================================================\n");
 
 
-                if rsp_pkt.need_responce.unwrap()
-                {
-                    stream.write(&rsp_pkt.responce.unwrap().as_bytes()).unwrap();
-                }
-                if rsp_pkt.kill_flag.unwrap()
-                {
-                    break;
-                }
-                //stream.write(b"+$OK#9A").unwrap();//Убрать!
-                //println!("Answer: {}\n", "+");//Убрать!
-        }
+            if rsp_pkt.need_responce.unwrap()
+            {//Ответ требуется
+                stream.write(&rsp_pkt.responce.unwrap().as_bytes()).unwrap();
+            }
+            if rsp_pkt.kill_flag.unwrap()
+            {
+                break;
+            }
+            //stream.write(b"+$OK#9A").unwrap();//Убрать!
+            //println!("Answer: {}\n", "+");//Убрать!
+        }//loop
         break; //kill_flag
 
     }
