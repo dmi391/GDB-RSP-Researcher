@@ -137,12 +137,6 @@ impl<'a> RspPacket<'a>
         }
     }
 
-    ///Сформировать stop-reply packet
-    fn responce_stop_reply_packet(& mut self, signal: &str)
-    {
-
-    }
-
 
     ///Обработка полученной команды
     fn match_cmd(&mut self)
@@ -152,10 +146,11 @@ impl<'a> RspPacket<'a>
             '?'=>
             {
                 println!("GDB-Server : Получена команда ?");
+                //...
                 //Если цель остановлена (halt), ответить S05 = SIGTRAP
                 //Что делать если цель не остановлена? $''#00 или S00 или не отвечать ????
                 //Возможно добавить S02 = SIGINT
-                self.responce_add_usd_cs("S05");
+                self.responce("$T05#b9");
                 self.need_responce = Some(true);
             },
 
@@ -223,24 +218,6 @@ impl<'a> RspPacket<'a>
                     let bytes = usize::from_str_radix(&self.data.unwrap()[colon_pos+1..], 16).unwrap();
                     println!("GDB-Server : Получена команда M. Адрес = {:x}. Количество байт для записи = {}. Байты для записи = {:x}.", addr, bytes_len, bytes);
                 }
-                self.responce("$OK#9a");
-                self.need_responce = Some(true);
-            },
-
-            'c'=>
-            {
-                //Продолжить выполнение
-                if self.data.unwrap().len() == 1
-                {//'c' без адреса
-                    println!("GDB-Server : Получена команда c.");
-                }
-                else
-                {//'c' с адресом (адрес не обязателен)
-                    let addr = usize::from_str_radix(&self.data.unwrap()[1..], 16).unwrap();
-                    println!("GDB-Server : Получена команда c. Адрес = {:x}.", addr);
-                }
-                //...
-                //Ответ вроде не нужен !!!!!!!!????????
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
             },
@@ -340,19 +317,21 @@ impl<'a> RspPacket<'a>
                         "vCont;" =>
                         {//Команда к действию (vCont-action)
                             println!("GDB-Server : Получена команда vCont;");
-                            //Распарсить содержимое vCont (Пока считать, что будет один поток??)
+                            //Наверно для работы в единственном потоке можно ориентироваться на первое vCont-action ';s' или ';c'
                             match &self.data.unwrap()[5..7]
                             {
                                 ";c" =>
                                 {//continue action
                                     println!("GDB-Server : vCont, c-action");
-                                    self.responce_stop_reply_packet("05");
+                                    //...
+                                    self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
                                 ";s" =>
                                 {//step action
                                     println!("GDB-Server : vCont, s-action");
-                                    self.responce_stop_reply_packet("05");
+                                    //...
+                                    self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
                                 _=>
