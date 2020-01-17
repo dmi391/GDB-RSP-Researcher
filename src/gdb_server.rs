@@ -20,7 +20,7 @@ pub struct RspPacket<'a>
     pub cs: Option<&'a str>,                        // Контрольная сумма RSP-пакета
     pub responce: Option<String>,                   // Ответный RSP-пакет
     pub need_responce: Option<bool>,                // Признак необходимости ответа
-    pub kill_flag: Option<bool>,                    // Признак команды 'vKill' или 'k'
+    pub kill_flag: Option<bool>,                    // Признак команды 'vKill'
 }
 
 
@@ -251,8 +251,8 @@ impl<'a> RspPacket<'a>
                 {
                     println!("GDB-Server : Получена команда qAttached");
                     //Запрос: GDB-server подключается к существующему процессу или создает новый процесс?
-                    //Команда связана с перезапуском и остановкой цели. !!!!!!!!
-                    self.responce_add_usd_cs("0");
+                    //Команда связана с остановкой (и перезапуском) цели
+                    self.responce_add_usd_cs("0");//0: по команде (gdb) quit GDB пришлет 'vKill'. 1: по команде (gdb) quit GDB пришлет 'D'(Detach).
                     self.need_responce = Some(true);
                 }
                 else if self.data.unwrap().contains("qSymbol")
@@ -308,26 +308,26 @@ impl<'a> RspPacket<'a>
                 {
                     match &self.data.unwrap()[0..6]
                     {
-                        "vCont?" => //if self.data.unwrap().contains("vCont?")
+                        "vCont?"=> //if self.data.unwrap().contains("vCont?")
                         {//Запрос поддерживаемых vCont-action
                             println!("GDB-Server : Получена команда vCont?");
                             self.responce_add_usd_cs("vCont;c;C;s;S"); //GDB doesn't accept c without C and s without S
                             self.need_responce = Some(true);
                         }
-                        "vCont;" =>
+                        "vCont;"=>
                         {//Команда к действию (vCont-action)
                             println!("GDB-Server : Получена команда vCont;");
                             //Наверно для работы в единственном потоке можно ориентироваться на первое vCont-action ';s' или ';c'
                             match &self.data.unwrap()[5..7]
                             {
-                                ";c" =>
+                                ";c"=>
                                 {//continue action
                                     println!("GDB-Server : vCont, c-action");
                                     //...
                                     self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
-                                ";s" =>
+                                ";s"=>
                                 {//step action
                                     println!("GDB-Server : vCont, s-action");
                                     //...
@@ -367,9 +367,23 @@ impl<'a> RspPacket<'a>
                 }
             },
 
+            '!'=> //Пока непонятно, получится использовать extended mode или нет..
+            {//Включение extended mode
+                println!("GDB-Server : Получена команда '!' (Enable extended mode)");
+                self.responce("$OK#9a");
+                self.need_responce = Some(true);
+            },
+
+            'R'=>
+            {//Restart. Работает только в extended mode. Ответ не требуется.
+                println!("GDB-Server : Получена команда R");
+                //...
+                self.need_responce = Some(false);
+            },
+
             _=>
             {
-                println!("GDB-Server : Unknown command!"); //Вывести "GDB-Server : Unknown command" в log
+                println!("GDB-Server : Unknown command {}", self.first_cmd_symbol.unwrap()); //Вывести "GDB-Server : Unknown command" в log
                 //Неподдерживаемые команды. Ответ от GDB-сервера должен быть: $#00
                 self.responce("+$#00");
                 self.need_responce = Some(true);
@@ -418,22 +432,25 @@ pub fn gdb_server()
                 //Убрать ======================================================================:
                 println!("len of src_packet: {}", rsp_pkt.len.unwrap()); //Длина пакета в буфере
                 //println!("Received Buffer: {}", str::from_utf8(&input_buf).unwrap()); //Буфер
-                println!("src_packet: {}", &rsp_pkt.src_packet.unwrap()); //Пакет в буфере
                 if input_len > 1
                 { //Пакет
+                    println!("src_packet: {}", &rsp_pkt.src_packet.unwrap()); //Пакет в буфере
                     println!("first_cmd_symbol: {}", &rsp_pkt.first_cmd_symbol.unwrap());
                     println!("data: {}", &rsp_pkt.data.unwrap());
                     println!("cs: {}", &rsp_pkt.cs.unwrap());
                     //println!("responce: {}", &(rsp_pkt.responce.unwrap()));//
                 }
-                else
+                else if input_len == 1
                 { //acknowledgment, не пакет
                     println!("only_ack: {}", &rsp_pkt.only_symb.unwrap());
                 }
-                if input_buf[0] != b'$'
-                { //Наличие acknowledgment символа '+' или '-'
-                    println!("last_ack_sign: {}", &rsp_pkt.last_ack_sign.unwrap());
+                else //input_len == 0
+                {
                 }
+                //if input_buf[0] != b'$'
+                //{ //Наличие acknowledgment символа '+' или '-'
+                //    println!("last_ack_sign: {}", &rsp_pkt.last_ack_sign.unwrap());
+                //}
                 if rsp_pkt.need_responce.unwrap()
                 {
                     let r = match rsp_pkt.responce
