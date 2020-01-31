@@ -145,28 +145,33 @@ impl<'a> RspPacket<'a>
         {
             '?'=>
             {
+                //Запрос состояние цели (причины останова)
+                //$?
                 println!("GDB-Server : Получена команда ?");
-                //...
                 //Если цель остановлена (halt), ответить S05 = SIGTRAP
                 //Что делать если цель не остановлена? $''#00 или S00 или не отвечать ????
                 //Возможно добавить S02 = SIGINT
+                //...
                 self.responce("$T05#b9");
                 self.need_responce = Some(true);
             },
 
             'g'=>
             {
-                println!("GDB-Server : Получена команда g");
                 //Чтение всех регистров общего назначения
+                //$g
+                println!("GDB-Server : Получена команда g");
+                //...
                 self.responce_add_usd_cs("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
                 self.need_responce = Some(true);
             },
 
             'G'=>
             {
-                println!("GDB-Server : Получена команда G");
                 //Запись всех регистров общего назначения
-                //Реализовать !!!!!!!!!!!!
+                //$G<байты>
+                println!("GDB-Server : Получена команда G");
+                //...
                 //Искать .find("G") только в начале (для скорости)
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
@@ -175,6 +180,7 @@ impl<'a> RspPacket<'a>
             'p'=>
             {
                 //Чтение произвольного регистра
+                //$p<n>
                 println!("GDB-Server : Получена команда p. Номер регистра {}", usize::from_str_radix(&self.data.unwrap()[1..], 16).unwrap());
                 self.responce_add_usd_cs("0a00011000000000");
                 self.need_responce = Some(true);
@@ -183,6 +189,7 @@ impl<'a> RspPacket<'a>
             'P'=>
             {
                 //Запись произвольного регистра
+                //$P<n>=<байты>
                 let eq_pos = self.data.unwrap().find("=").unwrap(); //Позиция знака '=' для определения номера регистра
                 let reg_num = usize::from_str_radix(&self.data.unwrap()[1..eq_pos], 16).unwrap();
                 let reg_val = usize::from_str_radix(&self.data.unwrap()[eq_pos+1..], 16).unwrap(); //Значение перевернуто!
@@ -194,10 +201,11 @@ impl<'a> RspPacket<'a>
             'm'=>
             {
                 //Чтение памяти
+                //$m<addr>,<len>
                 let comma_pos = self.data.unwrap().find(",").unwrap(); //Позиция знака ',' для определения адреса
                 let addr = usize::from_str_radix(&self.data.unwrap()[1..comma_pos], 16).unwrap();
                 let bytes_len = usize::from_str_radix(&self.data.unwrap()[comma_pos+1..], 16).unwrap();
-                println!("GDB-Server : Получена команда m. Адрес = {:x}. Количество байт для чтения = {}", addr, bytes_len);
+                println!("GDB-Server : Получена команда m. Адрес = 0x{:x}. Количество байт для чтения = {}", addr, bytes_len);
                 self.responce_add_usd_cs("00112233");
                 self.need_responce = Some(true);
             },
@@ -205,21 +213,134 @@ impl<'a> RspPacket<'a>
             'X' | 'M'=>
             {
                 //Запись в память
+                //$M<addr>,<len>:<data>
                 let comma_pos = self.data.unwrap().find(",").unwrap(); //Позиция знака ',' для определения адреса
                 let addr = usize::from_str_radix(&self.data.unwrap()[1..comma_pos], 16).unwrap();
                 let colon_pos = self.data.unwrap().find(":").unwrap(); //Позиция знака ':' для определения числа байт
                 let bytes_len = usize::from_str_radix(&self.data.unwrap()[comma_pos+1..colon_pos], 16).unwrap();
                 if bytes_len == 0
                 {//Пробный пустой пакет "X0,0:"
-                    println!("GDB-Server : Получена команда M. Адрес = {:x}. Количество байт для записи = {}.", addr, bytes_len);
+                    println!("GDB-Server : Получена команда M. Адрес = 0x{:x}. Количество байт для записи = {}.", addr, bytes_len);
                 }
                 else
                 {
                     let bytes = usize::from_str_radix(&self.data.unwrap()[colon_pos+1..], 16).unwrap();
-                    println!("GDB-Server : Получена команда M. Адрес = {:x}. Количество байт для записи = {}. Байты для записи = {:x}.", addr, bytes_len, bytes);
+                    println!("GDB-Server : Получена команда M. Адрес = 0x{:x}. Количество байт для записи = {}. Байты для записи = 0x{:x}.", addr, bytes_len, bytes);
                 }
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
+            },
+
+            'z'=>
+            {
+                //Снятие matchpoint
+                //$z<type>,<addr>,<kind>
+                let addr_pos = 3; //Позиция addr = Позиция первой ',' +1
+                let kind_pos = self.data.unwrap()[addr_pos..].find(",").unwrap() +1; //Позиция kind = Позиция второй ',' относительно addr_pos +1
+                let addr = usize::from_str_radix(&self.data.unwrap()[addr_pos..addr_pos+kind_pos-1], 16).unwrap();
+                let kind = usize::from_str_radix(&self.data.unwrap()[addr_pos+kind_pos..], 16).unwrap();
+                println!("GDB-Server : Получена команда z. addr = 0x{:x}. kind = {}", addr, kind);
+
+                match &self.data.unwrap()[1..2] //type
+                {
+                    "0"=>
+                    {//software breakpoint
+                        println!("GDB-Server : Получена команда z0");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "1"=>
+                    {//hardware breakpoint
+                        println!("GDB-Server : Получена команда z1");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "2"=>
+                    {//write watchpoint
+                        println!("GDB-Server : Получена команда z2");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "3"=>
+                    {//read watchpoint
+                        println!("GDB-Server : Получена команда z3");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "4"=>
+                    {//access watch point
+                        println!("GDB-Server : Получена команда z4");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    _=>
+                    {
+                        println!("GDB-Server : Unknown z-type: {}", &self.data.unwrap()[1..2]);
+                        self.responce("+$#00");
+                        self.need_responce = Some(true);
+                    },
+                }//match z-type
+            },
+
+            'Z'=>
+            {
+                //Установка matchpoint
+                //$Z<type>,<addr>,<kind>
+                let addr_pos = 3; //Позиция addr = Позиция первой ',' +1
+                let kind_pos = self.data.unwrap()[addr_pos..].find(",").unwrap() +1; //Позиция kind = Позиция второй ',' относительно addr_pos +1
+                let addr = usize::from_str_radix(&self.data.unwrap()[addr_pos..addr_pos+kind_pos-1], 16).unwrap();
+                let kind = usize::from_str_radix(&self.data.unwrap()[addr_pos+kind_pos..], 16).unwrap(); //Если будут опциональные параметры (...[;cond_list...][;cmds:persist,cmd_list...]), то так работать не будет. kind надо будет выделять не до конца, а до первой ';'
+                println!("GDB-Server : Получена команда Z. addr = 0x{:x}. kind = {}", addr, kind);
+
+                match &self.data.unwrap()[1..2] //type
+                {
+                    "0"=>
+                    {//software breakpoint
+                        println!("GDB-Server : Получена команда Z0");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "1"=>
+                    {//hardware breakpoint
+                        println!("GDB-Server : Получена команда Z1");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "2"=>
+                    {//write watchpoint
+                        println!("GDB-Server : Получена команда Z2");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "3"=>
+                    {//read watchpoint
+                        println!("GDB-Server : Получена команда Z3");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    "4"=>
+                    {//access watch point
+                        println!("GDB-Server : Получена команда Z4");
+                        //...
+                        self.responce("$OK#9a");
+                        self.need_responce = Some(true);
+                    },
+                    _=>
+                    {
+                        println!("GDB-Server : Unknown Z-type: {}", &self.data.unwrap()[1..2]);
+                        self.responce("+$#00");
+                        self.need_responce = Some(true);
+                    },
+                }//match Z-type
             },
 
             'q'=>
@@ -325,6 +446,7 @@ impl<'a> RspPacket<'a>
                                     println!("GDB-Server : vCont, c-action");
                                     //...
                                     self.responce("$T05#b9"); //Stop-reply packet
+                                    //Плюс еще можно ответить Otext
                                     self.need_responce = Some(true);
                                 },
                                 ";s"=>
@@ -365,20 +487,6 @@ impl<'a> RspPacket<'a>
                     self.responce("+$#00");
                     self.need_responce = Some(true);
                 }
-            },
-
-            '!'=> //Пока непонятно, получится использовать extended mode или нет..
-            {//Включение extended mode
-                println!("GDB-Server : Получена команда '!' (Enable extended mode)");
-                self.responce("$OK#9a");
-                self.need_responce = Some(true);
-            },
-
-            'R'=>
-            {//Restart. Работает только в extended mode. Ответ не требуется.
-                println!("GDB-Server : Получена команда R");
-                //...
-                self.need_responce = Some(false);
             },
 
             _=>
