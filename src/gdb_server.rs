@@ -3,9 +3,9 @@ use std::io::Write;
 use std::io::Read;
 use std::net::TcpListener;
 
-    ///PACKET_SIZE - Размер GDB-RSP-пакета ("PacketSize=PACKET_SIZE" в ответ на qSupported)
+    ///PACKET_SIZE - Размер GDB-RSP-пакета в байтах ("PacketSize=PACKET_SIZE" в ответ на qSupported)
     ///Размер должен вмещать все GPR регистры + символ 'G'
-    const PACKET_SIZE: usize = 1024; //Уточнить, возможно имеет смысл сделать побольше !!!!!!!!
+    const PACKET_SIZE: usize = 2048; //Уточнить, возможно имеет смысл сделать побольше !!!!!!!!
     ///BUF_SIZE - Размер буфера под TCP-пакет от GDB (В 2 раза больше просто на всякий случай) //???????
     const BUF_SIZE: usize = PACKET_SIZE * 2;
 
@@ -18,8 +18,9 @@ pub struct RspPacket<'a>
     pub last_ack_sign: Option<char>,                // Acknowledgment '+' или '-' для предыдущего пакета (если есть). На случай, если no-acknowledgment режим еще не включен
     pub only_symb: Option<bool>,                    // Признак того, что это не пакет, а одиночный acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
     pub cs: Option<&'a str>,                        // Контрольная сумма RSP-пакета
+    pub need_responce: Option<bool>,                // Признак необходимости ответа. Без need_responce не обойтись т.к. в конструкторе заранее неизвостно, что будет содержать responce
     pub responce: Option<String>,                   // Ответный RSP-пакет
-    pub need_responce: Option<bool>,                // Признак необходимости ответа
+    pub output_text: Option<String>,                // Текстовое сообщение для вывода в GDB-консоль. Допустимо только с Stop Reply Packet и qRcmd !!
     pub kill_flag: Option<bool>,                    // Признак команды 'vKill'
 }
 
@@ -46,8 +47,9 @@ impl<'a> RspPacket<'a>
                     last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
                     only_symb: Some(false),
                     cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
-                    responce: None, //Ответ будет сформирован при необходимости
                     need_responce: Some(true), //Признак может быть сброшен в зависимости от пришедшей команды (только в случае, если это Пакет)
+                    responce: None, //Ответ будет сформирован при необходимости
+                    output_text: None,
                     kill_flag: Some(false),
                 }
             }
@@ -61,8 +63,9 @@ impl<'a> RspPacket<'a>
                     last_ack_sign: Some(char::from(input_buf[0])),
                     only_symb: Some(true),
                     cs: None,
-                    responce: None, //Ответ будет сформирован при необходимости
                     need_responce: Some(true), //На '+' надо ответить '+'; На '-' надо повторить последний пакет; На Ctrl+C - Stop Reply Packet
+                    responce: None, //Ответ будет сформирован при необходимости
+                    output_text: None,
                     kill_flag: Some(false),
                 }
             }
@@ -76,8 +79,9 @@ impl<'a> RspPacket<'a>
                     last_ack_sign: None,
                     only_symb: None,
                     cs: None,
-                    responce: None,
                     need_responce: Some(false), //Игнорировать пустое сообщение
+                    responce: None,
+                    output_text: None,
                     kill_flag: Some(false),
                 }
             }
@@ -110,9 +114,47 @@ impl<'a> RspPacket<'a>
                     None => panic!("RspPacket.responce = None"),
                 };
 
-        if l.len() / 2 > PACKET_SIZE //Длина уже с учетом $ и #cs. Длина строки в символах то есть в полубайтах
+        if l.len() > PACKET_SIZE //Длина уже с учетом $ и #cs. Длина строки в байтах
         {
-            panic!("Формирование ответного RSP-пакета: пакет длиннее чем PACKET_SIZE. len = {}. PACKET_SIZE = {}", l.len() / 2, PACKET_SIZE);
+            panic!("Формирование ответного RSP-пакета: пакет длиннее чем PACKET_SIZE. len = {}. PACKET_SIZE = {}", l.len() , PACKET_SIZE);
+        }
+    }
+
+
+    ///Сформировать Otext RSP-пакет: Сформировать строку из ASCII-кодов исходного сообщения и обернуть её в $O и #cs
+    ///$O<console_output_text>#cs
+    fn text_add_usd_o_cs(& mut self, msg_str: &str)
+    {
+        //Создание строки с выделением буфера
+        self.output_text = Some(String::with_capacity(PACKET_SIZE)); //console_output_text RSP-пакет не должен быть длиннее PACKET_SIZE
+        let mut otext = String::with_capacity(PACKET_SIZE);
+
+        //Цикл для формирования строки otext, состоящих из ASCII-кодов символов строкового среза msg_str
+        for c in msg_str.as_bytes()
+        {
+            otext = otext + &format!("{:02x}", *c); //otext содержит значения *u8 в Hex
+        }
+
+        otext.insert(0, 'O'); //Добавить 'O' в начало otext
+        //Строка otext будет длинее, чем исходный срез msg_str. Так как на каждый символ среза msg_str будет приходиться по два символа (двузначное число в Hex) в строке otext
+        //И еще надо учесть 'O' в начале otext. Поэтому для подсчета cs для otext нужен отдельный цикл
+        let mut checksum: u8 = 0;
+        for c in otext.as_bytes()
+        {
+            checksum = checksum.wrapping_add(*c);
+        }
+
+        self.output_text = Some(format!("${}#{:02x}", otext, checksum));
+
+        let l = match self.output_text
+                {
+                    Some(ref v) => v,
+                    None => panic!("RspPacket.output_text = None"),
+                };
+
+        if l.len() > PACKET_SIZE //Длина уже с учетом $O и #cs. Длина строки в байтах
+        {
+            panic!("Формирование output_text RSP-пакета: пакет длиннее чем PACKET_SIZE. len = {}. PACKET_SIZE = {}", l.len() , PACKET_SIZE);
         }
     }
 
@@ -393,7 +435,10 @@ impl<'a> RspPacket<'a>
                 else if self.data.unwrap().contains("qRcmd") //monitor
                 {
                     println!("GDB-Server : Получена команда qRcmd");
-                    self.responce_add_usd_cs("O48656c6c6f2c20776f726c64210a");
+                    //$Otext можно использоватьтолько с Stop Reply Packet и с qRcmd
+                    //После $Otext обязательно должен быть $OK
+                    self.text_add_usd_o_cs(" Hello, everything !!!\n Hello, World !\n");
+                    self.responce("$OK#9a");
                     self.need_responce = Some(true);
                 }
                 else
@@ -555,32 +600,40 @@ pub fn gdb_server()
                 else //input_len == 0
                 {
                 }
-                //if input_buf[0] != b'$'
-                //{ //Наличие acknowledgment символа '+' или '-'
-                //    println!("last_ack_sign: {}", &rsp_pkt.last_ack_sign.unwrap());
-                //}
                 if rsp_pkt.need_responce.unwrap()
                 {
-                    let r = match rsp_pkt.responce
+                    let r = match rsp_pkt.responce //Сделано так, чтобы не было ошибки перемещения
                     {
                         Some(ref v) => v,
                         None => panic!("RspPacket.responce = None"),
                     };
                     println!("responce: {}", &r);
+
+                    if rsp_pkt.output_text.is_some()
+                    {
+                        let r = match rsp_pkt.output_text
+                        {
+                            Some(ref v) => v,
+                            None => panic!("RspPacket.output_text = None"),
+                        };
+                        println!("output_text: {}", &r);
+                    }
                 }
                 println!("==================================================\n");
 
 
             if rsp_pkt.need_responce.unwrap()
             {//Ответ требуется
-                stream.write(&rsp_pkt.responce.unwrap().as_bytes()).unwrap();
+                if rsp_pkt.output_text.is_some() //output_text обязательно перед responce
+                {//output_text может быть только в ответ на vCont и qRcmd
+                    stream.write(&rsp_pkt.output_text.unwrap().as_bytes()).unwrap();
+                }
+                stream.write(&rsp_pkt.responce.unwrap().as_bytes()).unwrap(); //Ответ в TcpStream. Сделано в конце, чтобы не было ошибки перемещения
             }
             if rsp_pkt.kill_flag.unwrap()
             {
                 break;
             }
-            //stream.write(b"+$OK#9A").unwrap();//Убрать!
-            //println!("Answer: {}\n", "+");//Убрать!
         }//loop
         break; //kill_flag
 
