@@ -159,6 +159,34 @@ impl<'a> RspPacket<'a>
     }
 
 
+    ///Сформировать monitor-команду (текст) из ASCII-кодов, содержащихся в &str
+    //Возвращается String потому что внутри функции модифицируется строка
+    //Исходный срез cmd_str содержит последовательность двухзначных ASCII-коды (в Hex) символов. А в результате должна получиться строка String этих символов
+    //Если измерять в u8, то результирующая String в два раза короче исходного cmd_str. Потому что на каждый итоговый символ приходится две Hex-цифры исходного ASCII-кода
+    //Алгоритм работы:
+            //Из исходного строкового среза cmd_str формируется вектор подсрезов (по два u8 каждый) - двухзначные ASCII-коды;
+            //Итератор по подсрезам: 
+                //Получить строковый срез из подсреза(два u8);
+                //Получить само значение ASCII-кода, сохранить в u8;
+                //u8 привести к char и присоединить в конец String.
+    fn extract_monitor_cmd(cmd_str: &str) -> String
+    {
+        let mut result_cmd = String::with_capacity(PACKET_SIZE); //Создание строки с выделением буфера
+        let mut one_symb_ascii_str; //Строковый срез str. Двухзначный ASCII-код одного символа из начального среза cmd_str
+        let mut one_symb_ascii_u8: u8 = 0;
+
+        let str_by_2_u8 = cmd_str.as_bytes().chunks(2); //Из среза cmd_str.as_bytes() сформировать вектор непересекающихся подсрезов по два u8
+
+        for subslice in str_by_2_u8 //Итератор по подсрезам (по два u8)
+        {
+            one_symb_ascii_str = str::from_utf8(&subslice).unwrap(); //Получение строкового среза из подсреза u8 (из двух u8)
+            one_symb_ascii_u8 = u8::from_str_radix(one_symb_ascii_str, 16).unwrap(); //Получить само значение ASCII-кода из его исходного представления в HEX виде
+            result_cmd.push(char::from(one_symb_ascii_u8)); //Получить char из u8. И присоединить к результирующей строке String
+        }
+        result_cmd
+    }
+
+
     ///Сформировать ответ без $ и #cs например для одиночного Ack '+' или '-'
     ///Можно использовать для $OK#9a и для $#00 т.к. responce() быстрее, чем responce_add_usd_cs()
     fn responce(& mut self, msg_str: &str)
@@ -432,12 +460,34 @@ impl<'a> RspPacket<'a>
                     self.responce_add_usd_cs("Text=0;Data=0;Bss=0");
                     self.need_responce = Some(true);
                 }
-                else if self.data.unwrap().contains("qRcmd") //monitor
+                else if self.data.unwrap().contains("qRcmd")
                 {
-                    println!("GDB-Server : Получена команда qRcmd");
-                    //$Otext можно использоватьтолько с Stop Reply Packet и с qRcmd
+                    //Консольная команда 'monitor command'
+                    //$qRcmd,command
+                    //$Otext можно использовать только с Stop Reply Packet и с qRcmd !
                     //После $Otext обязательно должен быть $OK
-                    self.text_add_usd_o_cs(" Hello, everything !!!\n Hello, World !\n");
+                    let command = RspPacket::extract_monitor_cmd(&self.data.unwrap()[6..]); //Поле 'command' находится после ','
+                    println!("GDB-Server : Получена команда qRcmd. command = \'{}\'", command);
+                    match &command[..]
+                    {
+                        "reset init"=>
+                        {
+                            //...
+                            self.text_add_usd_o_cs(" GDB-Server message : 'reset init' monitor command.\n + Any text message.\n");
+                            println!("GDB-Server : 'reset init' monitor command");
+                        },
+                        "reset halt"=>
+                        {
+                            //...
+                            self.text_add_usd_o_cs(" GDB-Server message : 'reset halt' monitor command.\n + Any text message.\n");
+                            println!("GDB-Server : 'reset halt' monitor command");
+                        },
+                        _=>
+                        {
+                            self.text_add_usd_o_cs( &(" GDB-Server message : Unknown monitor command \'".to_string() + &command + "\'!\n") );
+                            println!("GDB-Server : Unknown monitor command \'{}\'!", command);
+                        },
+                    }//match command
                     self.responce("$OK#9a");
                     self.need_responce = Some(true);
                 }
@@ -503,7 +553,7 @@ impl<'a> RspPacket<'a>
                                 },
                                 _=>
                                 {
-                                    println!("GDB-Server : Unknown vCont action: {}", &self.data.unwrap()[5..6]);
+                                    println!("GDB-Server : Unknown vCont action: {} !", &self.data.unwrap()[5..6]);
                                     self.responce("+$#00");
                                     self.need_responce = Some(true);
                                 },
@@ -511,7 +561,7 @@ impl<'a> RspPacket<'a>
                         },
                         _=>
                         {
-                            println!("GDB-Server : Unknown vCont command");
+                            println!("GDB-Server : Unknown vCont command!");
                             self.responce("+$#00");
                             self.need_responce = Some(true);
                         },
@@ -536,7 +586,7 @@ impl<'a> RspPacket<'a>
 
             _=>
             {
-                println!("GDB-Server : Unknown command {}", self.first_cmd_symbol.unwrap()); //Вывести "GDB-Server : Unknown command" в log
+                println!("GDB-Server : Unknown command {}!", self.first_cmd_symbol.unwrap()); //Вывести "GDB-Server : Unknown command" в log
                 //Неподдерживаемые команды. Ответ от GDB-сервера должен быть: $#00
                 self.responce("+$#00");
                 self.need_responce = Some(true);
