@@ -540,8 +540,9 @@ impl<'a> RspPacket<'a>
                                 {//continue action
                                     println!("GDB-Server : vCont, c-action");
                                     //...
+                                    //Перед Stop Reply Packet ещё можно ответить $Otext. $Otext можно использовать только с Stop Reply Packet и с qRcmd !
+                                    self.text_add_usd_o_cs(" GDB-Server message : Output text on vCont, c-action.\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
-                                    //Плюс еще можно ответить Otext
                                     self.need_responce = Some(true);
                                 },
                                 ";s"=>
