@@ -477,7 +477,7 @@ impl<'a> RspPacket<'a>
                             println!("GDB-Server : 'reset init' monitor command");
                         },
                         "reset halt"=>
-                        {
+                        {//monitor reset halt - видно, что команда точно используется в Eclipse
                             //...
                             self.text_add_usd_o_cs(" GDB-Server message : 'reset halt' monitor command.\n + Any text message.\n");
                             println!("GDB-Server : 'reset halt' monitor command");
@@ -541,7 +541,7 @@ impl<'a> RspPacket<'a>
                                     println!("GDB-Server : vCont, c-action");
                                     //...
                                     //Перед Stop Reply Packet ещё можно ответить $Otext. $Otext можно использовать только с Stop Reply Packet и с qRcmd !
-                                    self.text_add_usd_o_cs(" GDB-Server message : Output text on vCont, c-action.\n + Any text message.\n");
+                                    self.text_add_usd_o_cs(" GDB-Server message : Halted at address 0x... due to breakpoint. (vCont, c-action)\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
@@ -549,6 +549,7 @@ impl<'a> RspPacket<'a>
                                 {//step action
                                     println!("GDB-Server : vCont, s-action");
                                     //...
+                                    self.text_add_usd_o_cs(" GDB-Server message : Halted at address 0x... due to step. (vCont, s-action)\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
