@@ -671,7 +671,7 @@ pub fn gdb_server()
                         println!("output_text: {}", &r);
                     }
                 }
-                println!("==================================================\n");
+                println!("{}\n", "#".repeat(80)); //Конец технологического вывода для принятого RSP-сообщения
 
 
             if rsp_pkt.need_responce.unwrap()
