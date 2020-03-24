@@ -3,6 +3,9 @@ use std::io::Write;
 use std::io::Read;
 use std::net::TcpListener;
 
+use sim::run_sim;
+
+
     ///PACKET_SIZE - Размер GDB-RSP-пакета в байтах ("PacketSize=PACKET_SIZE" в ответ на qSupported)
     ///Размер должен вмещать все GPR регистры + символ 'G'
     const PACKET_SIZE: usize = 4096; //Поподбирать оптимальный размер !!!
@@ -545,7 +548,7 @@ impl<'a> RspPacket<'a>
                                 ";c"=>
                                 {//continue action
                                     println!("GDB-Server : vCont, c-action");
-                                    //...
+                                    run_sim().unwrap(); //Run simulation
                                     //Перед Stop Reply Packet ещё можно ответить $Otext. $Otext можно использовать только с Stop Reply Packet и с qRcmd !
                                     self.text_add_usd_o_cs(" GDB-Server message : Halted due to breakpoint. (vCont, c-action)\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
