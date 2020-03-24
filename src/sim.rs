@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 
 pub fn parse_args() -> bool
 {
@@ -24,15 +27,17 @@ pub fn parse_args() -> bool
     }
 }
 
-pub fn run_sim() -> Result<(),()>
+pub fn run_sim(cancel_flag: &Arc<AtomicBool>) -> Result<(),()>
 {//Run simulation
     if parse_args() == true
     {
         loop
         {
-            //if ...
-            //    break
-        };
+            if cancel_flag.load(Ordering::SeqCst)
+            {
+                break
+            }
+        }
     }
     Ok(())
 }
