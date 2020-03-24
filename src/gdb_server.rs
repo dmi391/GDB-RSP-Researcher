@@ -34,10 +34,8 @@ impl<'a> RspPacket<'a>
         {
             2...PACKET_SIZE => //Диапазоны в образцах включительные
             { //if input_len > 1 : Пакет $data#cs, а не одиночный символ
-                let usd_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .find('$').unwrap();
-                let sharp_pos = str::from_utf8(&input_buf[0..input_len]).unwrap() .find('#').unwrap(); //Или .rfind() для быстроты
-                println!("usd_pos: {}", usd_pos);//Убрать!
-                println!("sharp_pos: {}", sharp_pos);//Убрать!
+                let usd_pos = str::from_utf8(&input_buf[0..4]).unwrap() .find('$').unwrap(); //'$' должен быть 0м или 1м
+                let sharp_pos = input_len - 3; //str::from_utf8(&input_buf[0..input_len]).unwrap() .find('#').unwrap(); //Или .rfind() для быстроты            
 
                 RspPacket{
                     len: Some(input_len),
@@ -209,7 +207,7 @@ impl<'a> RspPacket<'a>
 
 
     ///Обработка полученной команды
-    fn match_cmd(&mut self)
+    fn match_cmd(&mut self, input_buf: &[u8])
     {
         match self.first_cmd_symbol.unwrap()
         {
@@ -284,20 +282,28 @@ impl<'a> RspPacket<'a>
             {
                 //Запись в память
                 //$X<addr>,<len>:<bytes>
-                let comma_pos = self.data.unwrap().find(",").unwrap(); //Позиция знака ',' для определения адреса
-                let addr = usize::from_str_radix(&self.data.unwrap()[1..comma_pos], 16).unwrap();
-                let colon_pos = self.data.unwrap().find(":").unwrap(); //Позиция знака ':' для определения числа байт
-                let bytes_len = usize::from_str_radix(&self.data.unwrap()[comma_pos+1..colon_pos], 16).unwrap();
-                if bytes_len == 0
-                {//Пробный пустой пакет "X0,0:"
-                    println!("GDB-Server : Получена команда 'M'. Адрес = 0x{:x}. Количество байт для записи = {}.", addr, bytes_len);
+                //Так как бинарные данные могут содержать только валидные utf8-символы, то self.data == from_utf8(...).unwrap() использовать нельзя
+                //self.data.unwrap().find(",").unwrap() не работает, поэтому надо определять позиции символов не в self.data: Option<&'a str>, а в исходном input_buf: &[u8]
+                let x_pos = input_buf.iter().position(|&x| x == 0x58).unwrap(); //0x58 == 'X' //Позиция знака 'X' для выделения поля адреса
+                let comma_pos = input_buf.iter().position(|&x| x == 0x2c).unwrap(); //0x2c == ',' //Позиция знака ',' для выделения поля адреса
+                let colon_pos = input_buf.iter().position(|&x| x == 0x3a).unwrap(); //0x3a == ':' //Позиция знака ':' для выделения поля количества байт
+
+                let x_cmd = str::from_utf8(&input_buf[0..colon_pos]).unwrap(); //"$X<addr>,<len>". То есть начиная с начала input_buf (а не с 'X') и не включая ':'
+
+                let mem_addr = Some( usize::from_str_radix(&x_cmd[x_pos+1..comma_pos], 16).unwrap() );
+                let mem_len = Some( usize::from_str_radix(&x_cmd[comma_pos+1..], 16).unwrap() ); //Количество байт для записи
+                let mut ibuf_start_mem: Option<usize> = None;
+
+                println!("GDB-Server : Получена команда 'X'. Адрес = 0x{:x}. Количество байт для записи = {}.", mem_addr.unwrap(), mem_len.unwrap());
+                if mem_len.unwrap() == 0
+                {//Пробный пустой пакет "X<addr>,0:"
+                    ibuf_start_mem = None;
                 }
                 else
                 {
-                    let bytes = usize::from_str_radix(&self.data.unwrap()[colon_pos+1..], 16).unwrap();
-                    println!("GDB-Server : Получена команда 'M'. Адрес = 0x{:x}. Количество байт для записи = {}. Байты для записи = 0x{:x}.", addr, bytes_len, bytes);
+                    ibuf_start_mem = Some(colon_pos+1); //bytes = &input_buf[colon_pos+1 .. colon_pos+1 + bytes_len];
                 }
-                self.responce("$OK#9a");
+                self.responce("$OK#9a"); //Признак может быть изменен на $E01 при записи m.state.mem.set_u8(...)
                 self.need_responce = Some(true);
             },
 
@@ -477,7 +483,7 @@ impl<'a> RspPacket<'a>
                             println!("GDB-Server : 'reset init' monitor command");
                         },
                         "reset halt"=>
-                        {//monitor reset halt - видно, что команда точно используется в Eclipse
+                        {
                             //...
                             self.text_add_usd_o_cs(" GDB-Server message : 'reset halt' monitor command.\n + Any text message.\n");
                             println!("GDB-Server : 'reset halt' monitor command");
@@ -541,7 +547,7 @@ impl<'a> RspPacket<'a>
                                     println!("GDB-Server : vCont, c-action");
                                     //...
                                     //Перед Stop Reply Packet ещё можно ответить $Otext. $Otext можно использовать только с Stop Reply Packet и с qRcmd !
-                                    self.text_add_usd_o_cs(" GDB-Server message : Halted at address 0x... due to breakpoint. (vCont, c-action)\n + Any text message.\n");
+                                    self.text_add_usd_o_cs(" GDB-Server message : Halted due to breakpoint. (vCont, c-action)\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
@@ -549,7 +555,7 @@ impl<'a> RspPacket<'a>
                                 {//step action
                                     println!("GDB-Server : vCont, s-action");
                                     //...
-                                    self.text_add_usd_o_cs(" GDB-Server message : Halted at address 0x... due to step. (vCont, s-action)\n + Any text message.\n");
+                                    self.text_add_usd_o_cs(" GDB-Server message : Halted due to step. (vCont, s-action)\n + Any text message.\n");
                                     self.responce("$T05#b9"); //Stop-reply packet
                                     self.need_responce = Some(true);
                                 },
@@ -625,32 +631,34 @@ pub fn gdb_server()
                 }
                 else
                 {//Пакет
-                    rsp_pkt.match_cmd();
+                    rsp_pkt.match_cmd(&input_buf);
                 }
             }
             if !rsp_pkt.need_responce.unwrap()
             {//Ответ не требуется. Отдельный if (а не else) т.к. изначальный признак need_responce может быть сброшен в зависимости от команды (только в случае, если это пакет)
-                //////////////////////////////Что-то сделать? (Вывести в Лог?)
             }
 
 
-                //Убрать ======================================================================:
+                //Технологический вывод ======================================================================:
                 println!("len of src_packet: {}", rsp_pkt.len.unwrap()); //Длина пакета в буфере
                 //println!("Received Buffer: {}", str::from_utf8(&input_buf).unwrap()); //Буфер
                 if input_len > 1
                 { //Пакет
-                    println!("src_packet: {}", &rsp_pkt.src_packet.unwrap()); //Пакет в буфере
                     println!("first_cmd_symbol: {}", &rsp_pkt.first_cmd_symbol.unwrap());
-                    println!("data: {}", &rsp_pkt.data.unwrap());
+                    if &rsp_pkt.first_cmd_symbol != &Some('X')
+                    {
+                        println!("data: {}", &rsp_pkt.data.unwrap());
+                    }
                     println!("cs: {}", &rsp_pkt.cs.unwrap());
-                    //println!("responce: {}", &(rsp_pkt.responce.unwrap()));//
                 }
                 else if input_len == 1
                 { //acknowledgment, не пакет
-                    println!("only_ack: {}", &rsp_pkt.only_symb.unwrap());
+                    println!("only_symb: {}", &rsp_pkt.only_symb.unwrap());
+                    println!("symbol: {:?}", char::from(input_buf[0]));
                 }
                 else //input_len == 0
                 {
+                    println!("Получен пакет нулевой длины");
                 }
                 if rsp_pkt.need_responce.unwrap()
                 {
@@ -659,7 +667,7 @@ pub fn gdb_server()
                         Some(ref v) => v,
                         None => panic!("RspPacket.responce = None"),
                     };
-                    println!("responce: {}", &r);
+                    println!("GDB-Server responce : {}", &r);
 
                     if rsp_pkt.output_text.is_some()
                     {
@@ -688,7 +696,6 @@ pub fn gdb_server()
             }
         }//loop
         break; //kill_flag
-
     }
     drop(listener);
     println!("Connection was killed!\n"); //Можно подключаться снова
