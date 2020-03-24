@@ -5,9 +5,9 @@ use std::net::TcpListener;
 
     ///PACKET_SIZE - Размер GDB-RSP-пакета в байтах ("PacketSize=PACKET_SIZE" в ответ на qSupported)
     ///Размер должен вмещать все GPR регистры + символ 'G'
-    const PACKET_SIZE: usize = 2048; //Уточнить, возможно имеет смысл сделать побольше !!!!!!!!
-    ///BUF_SIZE - Размер буфера под TCP-пакет от GDB (В 2 раза больше просто на всякий случай) //???????
-    const BUF_SIZE: usize = PACKET_SIZE * 2;
+    const PACKET_SIZE: usize = 4096; //Поподбирать оптимальный размер !!!
+    ///BUF_SIZE - Размер буфера под TCP-пакет от GDB (чуть больше просто на всякий случай)
+    const BUF_SIZE: usize = PACKET_SIZE + 256;
 
 pub struct RspPacket<'a>
 {
@@ -16,7 +16,7 @@ pub struct RspPacket<'a>
     pub data: Option<&'a str>,                      // Только данные <data> из RSP-пакета (между первым '$' и последним '#')
     pub first_cmd_symbol: Option<char>,             // Первый символ данных data[0]
     pub last_ack_sign: Option<char>,                // Acknowledgment '+' или '-' для предыдущего пакета (если есть). На случай, если no-acknowledgment режим еще не включен
-    pub only_symb: Option<bool>,                    // Признак того, что это не пакет, а одиночный acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+    pub only_symb: Option<bool>,                    // Признак того, что это не пакет, а одиночный acknowledgment '+'/'-'
     pub cs: Option<&'a str>,                        // Контрольная сумма RSP-пакета
     pub need_responce: Option<bool>,                // Признак необходимости ответа. Без need_responce не обойтись т.к. в конструкторе заранее неизвостно, что будет содержать responce
     pub responce: Option<String>,                   // Ответный RSP-пакет
@@ -52,9 +52,9 @@ impl<'a> RspPacket<'a>
                     output_text: None,
                     kill_flag: Some(false),
                 }
-            }
+            },
             1 =>
-            { //if 1 == input_len : Не пакет, а одиночный acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+            { //if 1 == input_len : Не пакет, а одиночный acknowledgment '+'/'-'
                 RspPacket{
                     len: Some(input_len),
                     src_packet: str::from_utf8(&input_buf[0..input_len]).ok(),
@@ -68,7 +68,7 @@ impl<'a> RspPacket<'a>
                     output_text: None,
                     kill_flag: Some(false),
                 }
-            }
+            },
             0 => 
             { //Пустое сообщение (input_len = 0)
                 RspPacket{
@@ -84,11 +84,11 @@ impl<'a> RspPacket<'a>
                     output_text: None,
                     kill_flag: Some(false),
                 }
-            }
+            },
             _ =>
             { //Такого не должно быть, так как input_len типа usize
                 panic!("Исключение в конструкторе структуры RspPacket: Некорректное значение input_len");
-            }
+            },
         }//match
     }
 
@@ -215,14 +215,12 @@ impl<'a> RspPacket<'a>
         {
             '?'=>
             {
-                //Запрос состояние цели (причины останова)
+                //Запрос состояния цели (причина останова)
                 //$?
                 println!("GDB-Server : Получена команда '?'");
-                //Если цель остановлена (halt), ответить S05 = SIGTRAP
-                //Что делать если цель не остановлена? $''#00 или S00 или не отвечать ????
-                //Возможно добавить S02 = SIGINT
-                //...
-                self.responce("$T05#b9");
+                //Stop-reply packet: Если цель остановлена (halt) - ответ T05 = SIGTRAP
+                //Stop-reply packet: Если цель прервана по ^C - ответ T02 = SIGINT
+                self.responce("$T02#b6"); //Stop-reply packet
                 self.need_responce = Some(true);
             },
 
@@ -232,7 +230,7 @@ impl<'a> RspPacket<'a>
                 //$g
                 println!("GDB-Server : Получена команда 'g'");
                 //...
-                self.responce_add_usd_cs("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+                self.responce_add_usd_cs("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100");
                 self.need_responce = Some(true);
             },
 
@@ -242,7 +240,6 @@ impl<'a> RspPacket<'a>
                 //$G<байты>
                 println!("GDB-Server : Получена команда 'G'");
                 //...
-                //Искать .find("G") только в начале (для скорости)
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
             },
@@ -252,7 +249,8 @@ impl<'a> RspPacket<'a>
                 //Чтение произвольного регистра
                 //$p<n>
                 println!("GDB-Server : Получена команда 'p'. Номер регистра {}", usize::from_str_radix(&self.data.unwrap()[1..], 16).unwrap());
-                self.responce_add_usd_cs("0a00011000000000");
+                //...
+                self.responce_add_usd_cs("7766554433221100"); //По RSP регистры передаются в little-endian
                 self.need_responce = Some(true);
             },
 
@@ -262,8 +260,9 @@ impl<'a> RspPacket<'a>
                 //$P<n>=<байты>
                 let eq_pos = self.data.unwrap().find("=").unwrap(); //Позиция знака '=' для определения номера регистра
                 let reg_num = usize::from_str_radix(&self.data.unwrap()[1..eq_pos], 16).unwrap();
-                let reg_val = usize::from_str_radix(&self.data.unwrap()[eq_pos+1..], 16).unwrap(); //Значение перевернуто!
-                println!("GDB-Server : Получена команда 'P'. Номер регистра {}. Значение = {}", reg_num, reg_val);
+                let reg_val = usize::from_str_radix(&self.data.unwrap()[eq_pos+1..], 16).unwrap(); //Значение в little-endian
+                println!("GDB-Server : Получена команда 'P'. Номер регистра {}. Значение = 0x{:016x}", reg_num, reg_val);
+                //...
                 self.responce("$OK#9a");
                 self.need_responce = Some(true);
             },
@@ -276,14 +275,15 @@ impl<'a> RspPacket<'a>
                 let addr = usize::from_str_radix(&self.data.unwrap()[1..comma_pos], 16).unwrap();
                 let bytes_len = usize::from_str_radix(&self.data.unwrap()[comma_pos+1..], 16).unwrap();
                 println!("GDB-Server : Получена команда 'm'. Адрес = 0x{:x}. Количество байт для чтения = {}", addr, bytes_len);
-                self.responce_add_usd_cs("00112233");
+                //...
+                self.responce_add_usd_cs("33221100");
                 self.need_responce = Some(true);
             },
 
-            'X' | 'M'=>
+            'X'=>
             {
                 //Запись в память
-                //$M<addr>,<len>:<data>
+                //$X<addr>,<len>:<bytes>
                 let comma_pos = self.data.unwrap().find(",").unwrap(); //Позиция знака ',' для определения адреса
                 let addr = usize::from_str_radix(&self.data.unwrap()[1..comma_pos], 16).unwrap();
                 let colon_pos = self.data.unwrap().find(":").unwrap(); //Позиция знака ':' для определения числа байт
@@ -618,7 +618,7 @@ pub fn gdb_server()
             if rsp_pkt.need_responce.unwrap()
             {//Ответ требуется
                 if rsp_pkt.only_symb.unwrap()
-                {//acknowledgment '+'/'-' или управляющий символ (Ctrl+C)
+                {//acknowledgment '+'/'-'
                     //На любой '+' надо ответить '+'. На '-' надо повторить последнее сообщение
                     //Наверно при работе по TCP/IP не будет '-' (поэтому ответ на '-' пока не реализован)
                     rsp_pkt.responce("+");
