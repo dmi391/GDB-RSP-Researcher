@@ -8,7 +8,7 @@ pub fn parse_args() -> bool
         {
             "--loop" | "-l"=>
             {
-                println!("  Started with loop run similation\n");
+                println!("  Started with loop run simulation\n");
                 true
             },
             _=>

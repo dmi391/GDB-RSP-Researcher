@@ -3,6 +3,11 @@ use std::io::Write;
 use std::io::Read;
 use std::net::TcpListener;
 
+use std::thread::spawn;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::channel;
+
 use sim::run_sim;
 
 
@@ -610,19 +615,67 @@ impl<'a> RspPacket<'a>
 ///GDB-Сервер
 pub fn gdb_server()
 {
-    let addr = "127.0.0.1:9999";
-    let listener = TcpListener::bind(addr).unwrap();
-    println!("Server listening at {}", addr);
-    let mut input_buf = [0x7Eu8; BUF_SIZE]; //Инициализация буфера символом '~'
-    let mut input_len = 0; //usize
+    //Для основного потока:
+    let mut input_buf = [0u8; BUF_SIZE];
+    let input_len = Arc::new(AtomicUsize::new(0)); //Потокобезопасный указатель со счетчиком ссылок типа Arc<AtomicUsize> для основного потока
+        //let mut input_len = 0; //Количество байт, принятых в буфер input_buf
+    let kill_flag = Arc::new(AtomicBool::new(false)); //Атомарный признак прихода RSP-команды 'vKill'
 
-    for stream in listener.incoming() //stream типа TcpStream
-    {
-        let mut stream = stream.unwrap();
+    //Для потока по работе с TCP:
+    let mut worker_input_buf = [0u8; BUF_SIZE];
+    let worker_input_len = input_len.clone(); //Указатель со счетчиком ссылок для потока worker (указывает на тоже самое значение input_len:AtomicUsize)
+    let worker_kill_flag = kill_flag.clone();
+
+    //Каналы
+    let (worker_send_inbuf, recv_inbuf) = channel::<[u8; BUF_SIZE]>(); //worker_send_inbuf - отправка input_buf из worker. recv_inbuf - приема input_buf в основном потоке
+    let (send_resp, worker_recv_resp) = channel::<Option<String>>(); //send_resp - отправка responce и otput_text из основного потока. worker_recv_resp - приема responce и otput_text в worker
+
+    //TCP worker **********************************************************************
+        let handle = spawn(move ||
+        {//Замыкание. Поток по работе с TCP
+            let addr = "127.0.0.1:9999";
+            let listener = TcpListener::bind(addr).unwrap();
+            println!("Server listening at {}", addr);
+            for strm in listener.incoming() //strm типа TcpStream
+            {//Ожидание подключения от GDB-client
+                let mut stream = strm.unwrap();
+                loop
+                {
+                    worker_input_len.store( stream.read(&mut worker_input_buf).unwrap(), Ordering::SeqCst ); //TCP: Считать пришедшие байты и их количество. Атомарный input_len: AtomicUsize.store(usize, Ordering::SeqCst)
+                        //Здесь происходит ожидание RSP-команд от GDB-клиента
+
+                    //Тут должно быть ожидание и обработка ^C
+                    //Ждать возможный приход ^C, только если пришло $vCont;c
+
+                    worker_send_inbuf.send(worker_input_buf).unwrap(); //Канал: Отправить input_buf в основной поток
+
+                    if let Ok(Some(worker_resp)) = worker_recv_resp.recv() //Канал: Принять RSP-ответ Option<String> от основного потока
+                    {//output_text
+                        stream.write(&worker_resp.as_bytes()).unwrap(); //RSP-ответ в TcpStream
+                    }
+                    if let Ok(Some(worker_resp)) = worker_recv_resp.recv() //Канал: Принять RSP-ответ Option<String> от основного потока
+                    {//responce
+                        stream.write(&worker_resp.as_bytes()).unwrap(); //RSP-ответ в TcpStream
+                    }
+
+                    if worker_kill_flag.load(Ordering::SeqCst)
+                    {
+                        println!("worker: kill_flag");
+                        break; //Завершить worker
+                    }
+                }//loop
+                break; //kill_flag
+            }
+            drop(listener);
+            println!("Connection was killed!\n"); //Можно подключаться снова
+        });
+    // **********************************************************************
+
         loop
         {
-            input_len = stream.read(&mut input_buf).unwrap();
-            let mut rsp_pkt = RspPacket::new(&input_buf, input_len);
+            input_buf = recv_inbuf.recv().unwrap(); //Канал: Принять input_buf: [u8; BUF_SIZE] от worker
+
+            let mut rsp_pkt = RspPacket::new(&input_buf, input_len.load(Ordering::SeqCst)); //Загрузить атомарное input_len и передать параметром в RspPacket::new(...)
 
             if rsp_pkt.need_responce.unwrap()
             {//Ответ требуется
@@ -641,11 +694,15 @@ pub fn gdb_server()
             {//Ответ не требуется. Отдельный if (а не else) т.к. изначальный признак need_responce может быть сброшен в зависимости от команды (только в случае, если это пакет)
             }
 
+            if rsp_pkt.kill_flag.unwrap()
+            {
+                kill_flag.store(true, Ordering::SeqCst); //kill_flag для worker
+            }
 
                 //Технологический вывод ======================================================================:
                 println!("len of src_packet: {}", rsp_pkt.len.unwrap()); //Длина пакета в буфере
                 //println!("Received Buffer: {}", str::from_utf8(&input_buf).unwrap()); //Буфер
-                if input_len > 1
+                if input_len.load(Ordering::SeqCst) > 1
                 { //Пакет
                     println!("first_cmd_symbol: {}", &rsp_pkt.first_cmd_symbol.unwrap());
                     if &rsp_pkt.first_cmd_symbol != &Some('X')
@@ -654,7 +711,7 @@ pub fn gdb_server()
                     }
                     println!("cs: {}", &rsp_pkt.cs.unwrap());
                 }
-                else if input_len == 1
+                else if input_len.load(Ordering::SeqCst) == 1
                 { //acknowledgment, не пакет
                     println!("only_symb: {}", &rsp_pkt.only_symb.unwrap());
                     println!("symbol: {:?}", char::from(input_buf[0]));
@@ -684,24 +741,15 @@ pub fn gdb_server()
                 }
                 println!("{}\n", "#".repeat(80)); //Конец технологического вывода для принятого RSP-сообщения
 
+            send_resp.send(rsp_pkt.output_text).unwrap(); //Канал: Отправить output_text в worker
+            send_resp.send(rsp_pkt.responce).unwrap(); //Канал: Отправить responce в worker
 
-            if rsp_pkt.need_responce.unwrap()
-            {//Ответ требуется
-                if rsp_pkt.output_text.is_some() //output_text обязательно перед responce
-                {//output_text может быть только в ответ на vCont и qRcmd
-                    stream.write(&rsp_pkt.output_text.unwrap().as_bytes()).unwrap();
-                }
-                stream.write(&rsp_pkt.responce.unwrap().as_bytes()).unwrap(); //Ответ в TcpStream. Сделано в конце, чтобы не было ошибки перемещения
-            }
             if rsp_pkt.kill_flag.unwrap()
             {
                 break;
             }
         }//loop
-        break; //kill_flag
-    }
-    drop(listener);
-    println!("Connection was killed!\n"); //Можно подключаться снова
+        handle.join().unwrap();
 }
 
 
