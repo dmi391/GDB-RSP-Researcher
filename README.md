@@ -8,11 +8,11 @@ Simple GDB-server for GDB RSP-protocol research.
 * Имитация зацикливания исполняемой программы и ее прерывания по ^C (работа в двух потоках)
 
 ## Сборка и запуск:
-	cargo run --release -- [--loop]
+	cargo run --release -- --loop
 	cargo run --release
 
 ## Запуск:
-	gdb-rsp-researcher.exe [--loop]
+	gdb-rsp-researcher.exe --loop
 	gdb-rsp-researcher.exe
 
 ## Параметры:

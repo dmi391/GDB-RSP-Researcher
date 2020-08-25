@@ -126,7 +126,7 @@ impl<'a> RspPacket<'a>
     }
 
 
-    ///Сформировать Otext RSP-пакет: Сформировать строку из ASCII-кодов исходного сообщения и обернуть её в $O и #cs
+    ///Сформировать Otext RSP-пакет: Сформировать строку из ASCII-кодов исходного сообщения (ASCII-код в виде двух Hex-цифр) и обернуть её в $O и #cs
     ///$O<console_output_text>#cs
     fn text_add_usd_o_cs(& mut self, msg_str: &str)
     {
@@ -141,7 +141,7 @@ impl<'a> RspPacket<'a>
         }
 
         otext.insert(0, 'O'); //Добавить 'O' в начало otext
-        //Строка otext будет длинее, чем исходный срез msg_str. Так как на каждый символ среза msg_str будет приходиться по два символа (двузначное число в Hex) в строке otext
+        //Строка otext будет длинее, чем исходный срез msg_str. Так как на каждый символ среза msg_str будет приходиться по два символа (ASCII-код в виде двух Hex-цифр) в строке otext
         //И еще надо учесть 'O' в начале otext. Поэтому для подсчета cs для otext нужен отдельный цикл
         let mut checksum: u8 = 0;
         for c in otext.as_bytes()
@@ -289,7 +289,7 @@ impl<'a> RspPacket<'a>
             {
                 //Запись в память
                 //$X<addr>,<len>:<bytes>
-                //Так как бинарные данные могут содержать только валидные utf8-символы, то self.data == from_utf8(...).unwrap() использовать нельзя
+                //Так как бинарные данные могут содержать не только валидные utf8-символы, то self.data == from_utf8(...).unwrap() использовать нельзя
                 //self.data.unwrap().find(",").unwrap() не работает, поэтому надо определять позиции символов не в self.data: Option<&'a str>, а в исходном input_buf: &[u8]
                 let x_pos = input_buf.iter().position(|&x| x == 0x58).unwrap(); //0x58 == 'X' //Позиция знака 'X' для выделения поля адреса
                 let comma_pos = input_buf.iter().position(|&x| x == 0x2c).unwrap(); //0x2c == ',' //Позиция знака ',' для выделения поля адреса
@@ -435,6 +435,9 @@ impl<'a> RspPacket<'a>
                     //'PacketSize=xx' обязательно.
                     //'QStartNoAckMode+' обязательно.
                     self.responce_add_usd_cs( &format!("PacketSize={:x};QStartNoAckMode+;vContSupported+", PACKET_SIZE) );
+                    //Добавить '+' перед уже сформированным RSP-ответом на qSupport (для работы без "set debug remote 1"). До включения no-acknowledgment режима
+                    let tmp = self.responce.clone();
+                    self.responce( &format!("+{}", tmp.unwrap()) );
                     self.need_responce = Some(true);
                 }
                 else if self.data.unwrap().contains("qfThreadInfo")
@@ -478,7 +481,7 @@ impl<'a> RspPacket<'a>
                     //Консольная команда 'monitor command'
                     //$qRcmd,command
                     //$Otext можно использовать только с Stop Reply Packet и с qRcmd !
-                    //После $Otext обязательно должен быть $OK
+                    //При выводе output_text по команде $qRcmd: После $Otext обязательно должен быть $OK
                     let command = RspPacket::extract_monitor_cmd(&self.data.unwrap()[6..]); //Поле 'command' находится после ','
                     println!("GDB-Server : Получена команда 'qRcmd'. command = \'{}\'", command);
                     match &command[..]
@@ -519,7 +522,7 @@ impl<'a> RspPacket<'a>
                 {
                     println!("GDB-Server : Получена команда 'QStartNoAckMode'");
                     //Дальше будем работать без подтверждений +/- (no-acknowledgment-режим)
-                    self.responce("$OK#9a");
+                    self.responce("+$OK#9a"); //'+' перед RSP-ответом на QStartNoAckMode (для работы без "set debug remote 1")
                     self.need_responce = Some(true);
                 }
                 else
@@ -612,8 +615,8 @@ impl<'a> RspPacket<'a>
 
             _=>
             {
-                println!("GDB-Server : Unknown command \'{}\'!", self.first_cmd_symbol.unwrap()); //Вывести "GDB-Server : Unknown command" в log
-                //Неподдерживаемые команды. Ответ от GDB-сервера должен быть: $#00
+                println!("GDB-Server : Unknown command \'{}\'!", self.first_cmd_symbol.unwrap());
+                //Неподдерживаемые команды. Ответ от GDB-сервера должен быть: +$#00
                 self.responce("+$#00");
                 self.need_responce = Some(true);
             },
