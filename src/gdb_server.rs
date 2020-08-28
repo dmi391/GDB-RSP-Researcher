@@ -19,7 +19,6 @@ use sim::run_sim;
 pub struct RspPacket<'a>
 {
     pub len: Option<usize>,                         // Длина принятого RSP-пакета
-    pub src_packet: Option<&'a str>,                // Исходный RSP-пакет в utf-8: (+/-)$<data>#cs
     pub data: Option<&'a str>,                      // Только данные <data> из RSP-пакета (между первым '$' и последним '#')
     pub first_cmd_symbol: Option<char>,             // Первый символ данных data[0]
     pub last_ack_sign: Option<char>,                // Acknowledgment '+' или '-' для предыдущего пакета (если есть). На случай, если no-acknowledgment режим еще не включен
@@ -44,25 +43,41 @@ impl<'a> RspPacket<'a>
                 let usd_pos = str::from_utf8(&input_buf[0..4]).unwrap() .find('$').unwrap(); //'$' должен быть 0м или 1м
                 let sharp_pos = input_len - 3; //str::from_utf8(&input_buf[0..input_len]).unwrap() .find('#').unwrap(); //Или .rfind() для быстроты            
 
-                RspPacket{
-                    len: Some(input_len),
-                    src_packet: str::from_utf8(&input_buf[0 .. input_len]).ok(),
-                    data: str::from_utf8(&input_buf[usd_pos+1 .. sharp_pos]).ok(),
-                    first_cmd_symbol: Some( char::from(input_buf[usd_pos+1]) ),
-                    last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
-                    only_symb: Some(false),
-                    cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
-                    need_responce: Some(true), //Признак может быть сброшен в зависимости от пришедшей команды (только в случае, если это Пакет)
-                    responce: None, //Ответ будет сформирован при необходимости
-                    output_text: None,
-                    kill_flag: Some(false),
+                if char::from(input_buf[usd_pos+1]) == 'X'
+                { //X-пакет, который содержит не только валидные utf-символы
+                    RspPacket{
+                        len: Some(input_len),
+                        data: None,
+                        first_cmd_symbol: Some( 'X' ),
+                        last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
+                        only_symb: Some(false),
+                        cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
+                        need_responce: Some(true), //Признак может быть сброшен в зависимости от пришедшей команды (только в случае, если это Пакет)
+                        responce: None, //Ответ будет сформирован при необходимости
+                        output_text: None,
+                        kill_flag: Some(false),
+                    }
+                }
+                else
+                {
+                    RspPacket{
+                        len: Some(input_len),
+                        data: str::from_utf8(&input_buf[usd_pos+1 .. sharp_pos]).ok(),
+                        first_cmd_symbol: Some( char::from(input_buf[usd_pos+1]) ),
+                        last_ack_sign: if let 1 = usd_pos {Some(char::from(input_buf[0]))} else{None},
+                        only_symb: Some(false),
+                        cs: str::from_utf8(&input_buf[sharp_pos+1 .. sharp_pos+3]).ok(),
+                        need_responce: Some(true), //Признак может быть сброшен в зависимости от пришедшей команды (только в случае, если это Пакет)
+                        responce: None, //Ответ будет сформирован при необходимости
+                        output_text: None,
+                        kill_flag: Some(false),
+                    }
                 }
             },
             1 =>
             { //if 1 == input_len : Не пакет, а одиночный acknowledgment '+'/'-'
                 RspPacket{
                     len: Some(input_len),
-                    src_packet: str::from_utf8(&input_buf[0..input_len]).ok(),
                     data: None,
                     first_cmd_symbol: None,
                     last_ack_sign: Some(char::from(input_buf[0])),
@@ -78,7 +93,6 @@ impl<'a> RspPacket<'a>
             { //Пустое сообщение (input_len = 0)
                 RspPacket{
                     len: Some(0),
-                    src_packet: None,
                     data: None,
                     first_cmd_symbol: None,
                     last_ack_sign: None,
@@ -649,10 +663,10 @@ pub fn gdb_server()
             {//Замыкание. Ожидание прихода ^C
                 loop
                 {
-                    ctrlc_stream.peek(&mut input_buf).expect("peek failed"); //Принять данные без освобождения очереди чтения
+                    let len = ctrlc_stream.peek(&mut input_buf).expect("peek failed"); //Принять данные без освобождения очереди чтения
                         //То есть если приходит пакет не с ^C, то реальное чтение произойдет на следующей итерации основного цикла loop
                         //А если приходит ^C, то выполняется ctrlc_stream.read(&mut ctrlc_buf) и очередь чтения освобождается
-                    if char::from(input_buf[0]).is_control() //Первый символ == ^C == 0x03 ?
+                    if len == 1 && u8::from(input_buf[0]) == 0x03 //Первый символ == ^C == 0x03 ?
                     {//Принят ^C
                         worker_cancel_flag.store(true, Ordering::SeqCst);
                         ctrlc_stream.read(&mut input_buf).expect("^C read failed"); //Освободить очередь чтения
