@@ -1,97 +1,121 @@
 # GDB-RSP-Researcher
 
 Simple GDB-server for GDB RSP-protocol research.
-Простой GDB-server для исследования GDB RSP-протокола.
-Реализовано:
-* Подключение к GDB-клиенту по TCP
-* Ответы на RSP команды от GDB-клиента
-* Имитация зацикливания исполняемой программы и ее прерывания по ^C (работа в двух потоках)
 
-## Сборка и запуск:
-	cargo run --release -- --loop
-	cargo run --release
+Implemented:
 
-## Запуск:
-	gdb-rsp-researcher.exe --loop
-	gdb-rsp-researcher.exe
+* Connection to GDB-client by TCP
+* Responses to RSP commands from GDB-client
+* Loop imitation of target program. And interrupt it by ^C (working in two threads)
 
-## Параметры:
-	--loop or -l : Имитация зацикливания исполняемой программы. Опционально.
+## Build and launch
+    cargo run --release -- --loop
+    or
+    cargo run --release
 
-## Работа с GDB:
-Запустить GDB и передать ему параметр файл .elf:
-	/pass-to-gdb/gdb /pass-to-elf/file.elf
+## Launch
+    gdb-rsp-researcher.exe --loop
+    or
+    gdb-rsp-researcher.exe
 
-В GDB-консоле:
+## Arguments
+`--loop` or `-l` : Loop imitation of target program execution (optional)
 
-Включить отладочный режим для RSP (необязательно):
-	(gdb) set debug remote 1
+## Working with GDB-client
+Launch GDB-client with path to elf-file as parameter:
 
-Подключиться к GDB-серверу:
-	(gdb) target remote localhost:9999
-	Произойдет инициирующий диалог (без прошивки).
+    /path-to-gdb/gdb /path-to-elf/file.elf
 
-Остановить ядро:
-	(gdb) monitor reset halt
-	или
-	(gdb) monitor reset init
+In GDB CLI:
 
-Выполнить загрузку секций из файла .elf:
-	(gdb) load /pass-to-elf/file.elf
-	или
-	(gdb) load
+Turn on RSP debug mode (optional):
 
+    (gdb) set debug remote 1
 
-Можно работать
+Connect to GDB-server:
 
-Установить breakpoint:
-	(gdb) break main
-	или
-	(gdb) b main
-	или
-	(gdb) b номер_строки
-	или
-	(gdb) b 0xадресHEX
+    (gdb) target remote localhost:9999
+        ...
+        initial dialog without loading elf sections
 
-Установить watchpoint:
-	(gdb) watch var
+Halt the core:
 
-Посмотреть информацию об установленных breakpoint и watchpoint:
-	(gdb) info break
+    (gdb) monitor reset halt
+        or
+    (gdb) monitor reset init
 
-Запустить исполнение:
-	(gdb) continue
-	(gdb) c
+Load sections from elf:
 
-Прервать исполнение: Ctrl+C
+    (gdb) load /path-to-elf/file.elf
+        or
+    (gdb) load
 
-Выполнить одну строку:
-	(gdb) step
-	(gdb) s
+__It is ready for work__
 
-Выполнить одну инструкцию:
-	(gdb) stepi
-	(gdb) si
+Set breakpoint:
 
-Чтение памяти:
-	(gdb) x addr
-	(gdb) x var
-	(gdb) print/x var
-	(gdb) x/8b 0x10030000 – считать 8 байт из памяти
-	(gdb) x/8c 0x10030000 - 8 символов
-	(gdb) x/8h 0x10030000 – 8 полуслов (2 байта)
-	(gdb) x/8w 0x10030000 – 8 слов (4 байта)
+    (gdb) break function_name
+        or
+    (gdb) b function_name
+        or
+    (gdb) b linenum
+        or
+    (gdb) b filename:linenum
+        or
+    (gdb) b 0xaddress
 
-Запись регистра:
-	(gdb) set $pc = main
-	или
-	(gdb) set $pc = 0xадресHEX
+Set watchpoint:
 
-Чтение регистра:
-	(gdb) print $pc
-	(gdb) p/x $pc
+    (gdb) watch var
 
-Чтение всех регистров:
-	(gdb) info registers
-	и
-	(gdb) info all-registers
+Information about breakpoints and watchpoints:
+
+    (gdb) info break
+
+Launch execution:
+
+    (gdb) continue
+        or
+    (gdb) c
+
+Interrupt execution: Ctrl+C
+
+Execute one line:
+
+    (gdb) step
+        or
+    (gdb) s
+
+Execute one instruction:
+
+    (gdb) stepi
+        or
+    (gdb) si
+
+Examining memory:
+
+    (gdb) x addr
+    (gdb) x var
+    (gdb) print/x var
+    (gdb) x/8b 0x10030000 – read 8 bytes from address
+    (gdb) x/8c 0x10030000 - 8 chars
+    (gdb) x/8h 0x10030000 – 8 half-words (2 bytes)
+    (gdb) x/8w 0x10030000 – 8 words (4 bytes)
+
+Write register:
+
+    (gdb) set $t0 = main
+        or
+    (gdb) set $t0 = 0xaddress
+
+Read register:
+
+    (gdb) print $t0
+        or
+    (gdb) p/x $t0
+
+Read all registers:
+
+    (gdb) info registers
+        or
+    (gdb) info all-registers
